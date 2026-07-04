@@ -279,10 +279,11 @@
   }
 
   // ===== 分片上传大视频(>100MB) =====
-  // 把文件切成 10MB 的块,每块用 Contents API 上传到 videos-pending/{baseName}/part-NNN
-  // 10MB 分片 base64 后约 13.3MB,在 GitHub Contents API 可靠处理范围内
+  // 把文件切成 25MB 的块,每块用 Contents API 上传到 videos-pending/{baseName}/part-NNN
+  // 25MB 分片 base64 后约 33MB,实测 50MB(base64 后 66.7MB)会触发 422 too large
+  // 25MB 在可靠处理范围内,306MB 视频只需 13 片
   // Action 自动合并所有分片并迁移到 Releases
-  const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+  const CHUNK_SIZE = 25 * 1024 * 1024; // 25MB
 
   async function uploadInChunks(file, token, item) {
     const baseName = uniqueName(file.name);

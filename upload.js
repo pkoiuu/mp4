@@ -198,6 +198,14 @@
     els.uploadList.insertBefore(item, els.uploadList.firstChild);
 
     try {
+      // 上传前快速复检 Token(避免长时间后 Token 失效)
+      updateItemStatus(item, 'uploading', '正在验证 Token...');
+      const tokenValid = await quickCheckToken(token);
+      if (!tokenValid) {
+        handleInvalidToken();
+        throw new Error('Token 已失效,请重新配置(见上方第 1 步)');
+      }
+
       if (sizeMB <= REPO_MAX_MB) {
         await uploadToRepo(file, token, item);
       } else {
@@ -242,6 +250,13 @@
     );
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        handleInvalidToken();
+        throw new Error('Token 无效或已过期,请重新配置(见上方第 1 步)');
+      }
+      if (res.status === 403) {
+        throw new Error('权限不足,请确认 Token 勾选了 repo 权限(不是 public_repo)');
+      }
       if (res.status === 422) {
         throw new Error('文件名冲突,请重命名后重试');
       }
@@ -303,6 +318,11 @@
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(JSON.parse(xhr.responseText));
         } else {
+          if (xhr.status === 401) {
+            handleInvalidToken();
+            reject(new Error('Token 无效或已过期,请重新配置(见上方第 1 步)'));
+            return;
+          }
           let msg = `HTTP ${xhr.status}`;
           try {
             const data = JSON.parse(xhr.responseText);
@@ -351,6 +371,42 @@
       throw new Error(data.message || '创建 Release 失败');
     }
     return res.json();
+  }
+
+  // ===== Token 快速复检 =====
+  /**
+   * 上传前快速验证 Token 是否仍然有效
+   * @param {string} token
+   * @returns {Promise<boolean>}
+   */
+  async function quickCheckToken(token) {
+    try {
+      const res = await fetch('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
+      });
+      return res.ok;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
+   * Token 失效时的处理:清除保存的 Token,显示配置面板
+   */
+  function handleInvalidToken() {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (_) {
+      /* 忽略 */
+    }
+    els.tokenInput.value = '';
+    els.saveTokenBtn.hidden = false;
+    els.validateTokenBtn.hidden = true;
+    els.clearTokenBtn.hidden = true;
+    els.uploadPanel.hidden = true;
+    els.tokenStatus.innerHTML = '⚠ Token 已失效,请重新创建并配置。<br>提示:创建 Token 时务必勾选 <code>repo</code> 权限(不是 public_repo)。';
+    els.tokenStatus.className = 'token-status error';
+    showToast('Token 已失效,请重新配置');
   }
 
   // ===== UI:上传任务卡片 =====

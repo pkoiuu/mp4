@@ -44,37 +44,29 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/migrate-large-videos.js
 
-      # 4. 提交迁移产生的删除变更(如果有)
-      - name: 提交迁移变更
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "无迁移变更,跳过提交"
-          else
-            git commit -m "chore: 迁移大视频到 Releases [skip ci]"
-            git push
-            echo "✓ 迁移变更已提交"
-          fi
-
-      # 5. 生成视频清单(扫描 videos/ 目录 + Releases)
+      # 4. 生成视频清单(扫描 videos/ 目录 + Releases)
       - name: 生成视频清单
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/generate-manifest.js
 
-      # 6. 提交并推送清单变更
-      - name: 提交清单变更
+      # 5. 提交所有变更(迁移删除 + 清单更新)一次性推送
+      - name: 提交并推送变更
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add videos.json
+          git add -A
           if git diff --cached --quiet; then
-            echo "清单无变化,跳过提交"
+            echo "无变更,跳过提交"
           else
-            git commit -m "chore: 自动更新视频清单 [skip ci]"
-            git push
-            echo "✓ 清单已提交"
+            git commit -m "chore: 自动更新视频清单和迁移大视频 [skip ci]"
+            # 拉取远程变更并 rebase,避免 push 冲突
+            git pull --rebase origin main 2>/dev/null || true
+            git push origin main 2>&1 || {
+              echo "push 失败,重试..."
+              git pull --rebase origin main
+              git push origin main
+            }
+            echo "✓ 变更已提交"
           fi

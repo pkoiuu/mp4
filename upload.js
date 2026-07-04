@@ -38,6 +38,8 @@
   };
 
   let toastTimer = null;
+  // 当前上传项(供 uploadContentToRepo 重试时访问)
+  let currentUploadItem = null;
 
   // ===== 初始化 =====
   function init() {
@@ -237,6 +239,8 @@
   async function uploadToRepo(file, token, item, targetDir) {
     const baseName = uniqueName(file.name);
     const path = `${targetDir}/${baseName}`;
+    currentUploadItem = item;
+
     updateItemStatus(item, 'uploading', '正在读取文件...');
 
     // 读取并转 base64
@@ -244,38 +248,17 @@
       updateItemProgress(item, p * 0.5, '读取文件中...');
     });
 
-    updateItemStatus(item, 'uploading', '正在上传到仓库...');
-    const res = await fetch(
-      `https://api.github.com/repos/${CONFIG.OWNER}/${CONFIG.REPO}/contents/${encodeURIComponent(path)}`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: `feat: 添加视频 ${baseName}`,
-          content,
-          branch: CONFIG.BRANCH || 'main',
-        }),
-      }
-    );
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401) {
-        handleInvalidToken();
-        throw new Error('Token 无效或已过期,请重新配置(见上方第 1 步)');
-      }
-      if (res.status === 403) {
-        throw new Error('权限不足,请确认 Token 勾选了 repo 权限(不是 public_repo)');
-      }
-      if (res.status === 422) {
-        throw new Error('文件名冲突,请重命名后重试');
-      }
-      throw new Error(data.message || `上传失败 (HTTP ${res.status})`);
-    }
+    // 上传(带进度和重试)
+    const startTime = Date.now();
+    updateItemStatus(item, 'uploading', '正在上传...');
+    await uploadContentToRepo(token, path, content, `feat: 添加视频 ${baseName}`, (progress) => {
+      const percent = 50 + progress * 0.5; // 读取占 50%,上传占 50%
+      const speed = computeSpeed(file.size * (progress / 100) * 0.5, Date.now() - startTime);
+      updateItemProgress(item, percent, `上传中 ${Math.round(progress)}% | ${speed.toFixed(1)} MB/s`);
+    });
+
     updateItemProgress(item, 100, '完成');
+    currentUploadItem = null;
   }
 
   // ===== 分片上传大视频(>100MB) =====
@@ -289,62 +272,139 @@
     const baseName = uniqueName(file.name);
     const chunkDir = `${LARGE_VIDEO_DIR}/${baseName}`;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    currentUploadItem = item;
 
-    updateItemStatus(item, 'uploading', `分片上传:共 ${totalChunks} 片`);
+    updateItemStatus(item, 'uploading', `准备分片上传:共 ${totalChunks} 片,每片 ${formatBytes(CHUNK_SIZE)}`);
 
     // 上传 info 文件(记录原始文件名和分片数,供 Action 合并)
     const info = JSON.stringify({ originalName: file.name, baseName, totalChunks, size: file.size });
     await uploadContentToRepo(token, `${chunkDir}/info.json`, btoa(unescape(encodeURIComponent(info))), `feat: 添加分片信息 ${baseName}`);
 
-    // 逐片上传
+    // 逐片上传(带网速和剩余时间)
+    let uploadedBytes = 0;
+    const startTime = Date.now();
+
     for (let i = 0; i < totalChunks; i++) {
       const start = i * CHUNK_SIZE;
       const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunkSize = end - start;
       const chunk = file.slice(start, end);
       const chunkNum = String(i + 1).padStart(3, '0');
       const chunkPath = `${chunkDir}/part-${chunkNum}`;
 
-      updateItemStatus(item, 'uploading', `上传分片 ${i + 1}/${totalChunks}(${formatBytes(end - start)})`);
+      updateItemDetail(item, i, totalChunks, chunkSize, uploadedBytes, file.size, startTime, 0);
 
       // 读取分片并转 base64
       const content = await blobToBase64(chunk);
-      await uploadContentToRepo(token, chunkPath, content, `feat: 上传分片 ${chunkNum}/${totalChunks} - ${baseName}`);
+      const chunkStartTime = Date.now();
 
-      // 更新进度
-      const overallProgress = ((i + 1) / totalChunks) * 100;
-      updateItemProgress(item, overallProgress, `已完成 ${i + 1}/${totalChunks} 片`);
+      // 上传分片(带进度回调)
+      await uploadContentToRepo(token, chunkPath, content, `feat: 上传分片 ${chunkNum}/${totalChunks} - ${baseName}`, (chunkProgress) => {
+        const currentSpeed = computeSpeed(uploadedBytes + (chunkSize * chunkProgress / 100), Date.now() - startTime);
+        updateItemDetail(item, i, totalChunks, chunkSize, uploadedBytes + (chunkSize * chunkProgress / 100), file.size, startTime, currentSpeed);
+      });
+
+      uploadedBytes += chunkSize;
+      const speed = computeSpeed(uploadedBytes, Date.now() - startTime);
+      updateItemDetail(item, i + 1, totalChunks, chunkSize, uploadedBytes, file.size, startTime, speed);
     }
-    updateItemProgress(item, 100, '全部上传完成');
+
+    updateItemProgress(item, 100, `全部 ${totalChunks} 片上传完成`);
+    currentUploadItem = null;
   }
 
   /**
-   * 上传 base64 内容到仓库 Contents API(无进度条,用于分片)
+   * 计算网速(bytes/ms → MB/s)
    */
-  async function uploadContentToRepo(token, path, content, message) {
-    const res = await fetch(
-      `https://api.github.com/repos/${CONFIG.OWNER}/${CONFIG.REPO}/contents/${encodeURIComponent(path)}`,
-      {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/vnd.github+json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message,
-          content,
-          branch: CONFIG.BRANCH || 'main',
-        }),
+  function computeSpeed(bytes, ms) {
+    if (ms <= 0) return 0;
+    return (bytes / 1024 / 1024) / (ms / 1000);
+  }
+
+  /**
+   * 更新上传项的详细进度(网速、剩余时间)
+   */
+  function updateItemDetail(item, current, total, chunkSize, uploadedBytes, totalBytes, startTime, speedMBps) {
+    const percent = (uploadedBytes / totalBytes) * 100;
+    const elapsedSec = (Date.now() - startTime) / 1000;
+    const remainingMB = (totalBytes - uploadedBytes) / 1024 / 1024;
+    const etaSec = speedMBps > 0.1 ? remainingMB / speedMBps : 0;
+
+    const statusText = `分片 ${current}/${total} | ${formatBytes(uploadedBytes)}/${formatBytes(totalBytes)} | ${speedMBps.toFixed(1)} MB/s | 剩余 ${formatTime(etaSec)}`;
+    updateItemProgress(item, percent, statusText);
+  }
+
+  /**
+   * 格式化时间(秒 → 分:秒)
+   */
+  function formatTime(sec) {
+    if (sec <= 0 || !isFinite(sec)) return '--:--';
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  /**
+   * 上传 base64 内容到仓库 Contents API(带重试,解决 409 冲突)
+   * 用 XHR 获得上传进度
+   */
+  function uploadContentToRepo(token, path, content, message, onProgress) {
+    return new Promise((resolve, reject) => {
+      const body = JSON.stringify({ message, content, branch: CONFIG.BRANCH || 'main' });
+      const url = `https://api.github.com/repos/${CONFIG.OWNER}/${CONFIG.REPO}/contents/${encodeURIComponent(path)}`;
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      function attempt() {
+        attempts++;
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', url, true);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        xhr.setRequestHeader('Accept', 'application/vnd.github+json');
+        xhr.setRequestHeader('Content-Type', 'application/json');
+
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && onProgress) {
+            onProgress((e.loaded / e.total) * 100);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(JSON.parse(xhr.responseText));
+          } else if (xhr.status === 409 && attempts < maxAttempts) {
+            // 409 冲突:仓库 HEAD 已变,等待后重试
+            updateItemStatus(currentUploadItem, 'uploading', `分片冲突,${attempts}/${maxAttempts} 次重试中...`);
+            setTimeout(attempt, 2000);
+          } else if (xhr.status === 401) {
+            handleInvalidToken();
+            reject(new Error('Token 无效或已过期,请重新配置'));
+          } else {
+            let msg = `HTTP ${xhr.status}`;
+            try {
+              const data = JSON.parse(xhr.responseText);
+              msg = data.message || msg;
+            } catch (_) {
+              /* 忽略 */
+            }
+            reject(new Error(msg));
+          }
+        };
+
+        xhr.onerror = () => {
+          if (attempts < maxAttempts) {
+            updateItemStatus(currentUploadItem, 'uploading', `网络错误,${attempts}/${maxAttempts} 次重试中...`);
+            setTimeout(attempt, 3000);
+          } else {
+            reject(new Error('网络错误,上传中断'));
+          }
+        };
+
+        xhr.send(body);
       }
-    );
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 401) {
-        handleInvalidToken();
-        throw new Error('Token 无效或已过期,请重新配置');
-      }
-      throw new Error(data.message || `上传分片失败 (HTTP ${res.status})`);
-    }
+
+      attempt();
+    });
   }
 
   /**

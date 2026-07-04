@@ -293,6 +293,61 @@
     setTimeout(fail, 3000);
   }
 
+  // ===== 播放器源管理:镜像优先,失败自动回退 =====
+  /**
+   * 设置视频播放源
+   * 策略:镜像 → GitHub 原始,依次尝试,加载失败自动切换下一个
+   */
+  function setVideoSource(links) {
+    // 仓库内视频:用 pages 同源链接
+    if (links.pages && !links.mirrors) {
+      els.modalVideo.src = links.pages;
+      return;
+    }
+
+    // Releases 视频:构建候选源列表(镜像优先 + 原始回退)
+    const candidates = [];
+    if (links.mirrors && links.mirrors.length > 0) {
+      candidates.push(...links.mirrors);
+    }
+    if (links.release) {
+      candidates.push(links.release);
+    }
+    if (candidates.length === 0) {
+      els.modalVideo.src = links.preferred;
+      return;
+    }
+
+    let currentIdx = 0;
+    const trySource = (idx) => {
+      if (idx >= candidates.length) {
+        console.warn('[播放器] 所有源均失败');
+        return;
+      }
+      const url = candidates[idx];
+      console.log(`[播放器] 尝试源 ${idx + 1}/${candidates.length}: ${url.substring(0, 60)}...`);
+      els.modalVideo.src = url;
+      els.modalVideo.load();
+
+      // 10 秒内加载失败,尝试下一个源
+      const timer = setTimeout(() => {
+        if (els.modalVideo.readyState < 2) {
+          console.warn(`[播放器] 源 ${idx + 1} 超时,切换到下一个`);
+          trySource(idx + 1);
+        }
+      }, 10000);
+
+      // 加载成功,清除超时
+      els.modalVideo.addEventListener('loadeddata', () => clearTimeout(timer), { once: true });
+      els.modalVideo.addEventListener('error', () => {
+        clearTimeout(timer);
+        trySource(idx + 1);
+      }, { once: true });
+    };
+
+    trySource(0);
+  }
+
   // ===== 播放器模态框 =====
   function openPlayer(video) {
     const links = getDirectLinks(video);
@@ -305,7 +360,8 @@
       ${video.uploadedAt ? `<span>上传: ${formatDate(video.uploadedAt)}</span>` : ''}
     `;
     els.modalLinks.innerHTML = renderLinkRows(video, links);
-    els.modalVideo.src = links.pages || links.preferred;
+    // 播放器:镜像优先,失败自动回退
+    setVideoSource(links);
     els.modal.hidden = false;
     document.body.style.overflow = 'hidden';
 
@@ -334,7 +390,14 @@
       rows.push(buildLinkRow('原始', links.raw, links.preferredType === 'raw'));
     }
     if (links.release) {
-      rows.push(buildLinkRow('Releases', links.release, links.preferredType === 'release'));
+      // 镜像直链(国内加速)
+      if (links.mirrors && links.mirrors.length > 0) {
+        links.mirrors.forEach((mirrorUrl, i) => {
+          const label = i === 0 ? '镜像 ★' : `镜像${i + 1}`;
+          rows.push(buildLinkRow(label, mirrorUrl, i === 0));
+        });
+      }
+      rows.push(buildLinkRow('GitHub 原始', links.release, links.preferredType === 'release'));
     }
     return rows.join('');
   }
@@ -416,14 +479,29 @@
    * @returns {{preferred:string, preferredType:string, jsdelivr?:string, raw?:string, release?:string}}
    */
   function getDirectLinks(video) {
-    const { OWNER, REPO, BRANCH, VIDEO_DIR, JSDELIVR_MAX_MB } = CONFIG;
+    const { OWNER, REPO, BRANCH, VIDEO_DIR, JSDELIVR_MAX_MB, RELEASE_MIRRORS } = CONFIG;
     const sizeMB = (video.size || 0) / 1024 / 1024;
 
-    // Releases 视频直接用下载链接
+    // Releases 视频:生成镜像链接 + 原始链接
     if (video.source === 'release') {
-      const url = video.url ||
+      const originalUrl = video.url ||
         `https://github.com/${OWNER}/${REPO}/releases/download/${encodeURIComponent(video.tag || 'latest')}/${encodeURIComponent(video.name)}`;
-      return { preferred: url, preferredType: 'release', release: url };
+      const links = { preferred: originalUrl, preferredType: 'release', release: originalUrl, mirrors: [] };
+      // 生成镜像链接(把 https://github.com 替换为镜像前缀)
+      if (Array.isArray(RELEASE_MIRRORS)) {
+        for (const mirror of RELEASE_MIRRORS) {
+          if (mirror && originalUrl.startsWith('https://github.com')) {
+            const mirrorUrl = mirror + originalUrl;
+            links.mirrors.push(mirrorUrl);
+            // 第一个镜像作为优先源
+            if (links.mirrors.length === 1) {
+              links.preferred = mirrorUrl;
+              links.preferredType = 'mirror';
+            }
+          }
+        }
+      }
+      return links;
     }
 
     // 仓库内视频

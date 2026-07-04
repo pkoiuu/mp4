@@ -23,6 +23,14 @@ window.VIDEO_CONFIG = {
   // 页面对这类视频自动改用 Releases 下载链接
   RELEASE_THRESHOLD_MB: 100,
 
+  // Releases 国内加速镜像(播放器自动尝试,失败回退到 GitHub 原始链接)
+  // 镜像格式:把 https://github.com 替换为镜像前缀
+  // 留空数组则只用 GitHub 原始链接
+  RELEASE_MIRRORS: [
+    'https://gh-proxy.com',
+    'https://github.catvod.com',
+  ],
+
   // 分页:每页显示视频数量
   PAGE_SIZE: 12,
   // 缩略图:不生成海报时使用 video 元素第一帧(seek 到该秒截图)

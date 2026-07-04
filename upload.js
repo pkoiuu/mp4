@@ -209,14 +209,14 @@
       }
 
       if (sizeMB > REPO_MAX_MB) {
-        // 超过 100MB,GitHub API 无法直接上传,提示用户切分
-        throw new Error(
-          `文件 ${formatBytes(file.size)} 超过 100MB,GitHub API 单文件上限 100MB。\n` +
-          `请将视频切分为小于 100MB 的片段后分别上传,或用命令行 git push。`
-        );
+        // 超过 100MB,用分片上传:切成 50MB 块,Action 合并后迁移到 Release
+        await uploadInChunks(file, token, item);
+        updateItemStatus(item, 'success', '分片上传成功!Action 将自动合并并迁移到 Releases(约 2-3 分钟)');
+        showToast(`上传成功:${file.name}`);
+        return;
       }
 
-      // 小视频(<=100MB)直接上传到 videos/,大视频上传到 videos-pending/ 由 Action 迁移到 Releases
+      // 小视频(<=100MB)直接上传到 videos/,大视频(50-100MB)上传到 videos-pending/ 由 Action 迁移
       const targetDir = sizeMB <= 50 ? (CONFIG.VIDEO_DIR || 'videos') : LARGE_VIDEO_DIR;
       await uploadToRepo(file, token, item, targetDir);
       if (targetDir === LARGE_VIDEO_DIR) {
@@ -276,6 +276,88 @@
       throw new Error(data.message || `上传失败 (HTTP ${res.status})`);
     }
     updateItemProgress(item, 100, '完成');
+  }
+
+  // ===== 分片上传大视频(>100MB) =====
+  // 把文件切成 50MB 的块,每块用 Contents API 上传到 videos-pending/{baseName}/part-NNN
+  // Action 自动合并所有分片并迁移到 Releases
+  const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB
+
+  async function uploadInChunks(file, token, item) {
+    const baseName = uniqueName(file.name);
+    const chunkDir = `${LARGE_VIDEO_DIR}/${baseName}`;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    updateItemStatus(item, 'uploading', `分片上传:共 ${totalChunks} 片`);
+
+    // 上传 info 文件(记录原始文件名和分片数,供 Action 合并)
+    const info = JSON.stringify({ originalName: file.name, baseName, totalChunks, size: file.size });
+    await uploadContentToRepo(token, `${chunkDir}/info.json`, btoa(unescape(encodeURIComponent(info))), `feat: 添加分片信息 ${baseName}`);
+
+    // 逐片上传
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
+      const chunkNum = String(i + 1).padStart(3, '0');
+      const chunkPath = `${chunkDir}/part-${chunkNum}`;
+
+      updateItemStatus(item, 'uploading', `上传分片 ${i + 1}/${totalChunks}(${formatBytes(end - start)})`);
+
+      // 读取分片并转 base64
+      const content = await blobToBase64(chunk);
+      await uploadContentToRepo(token, chunkPath, content, `feat: 上传分片 ${chunkNum}/${totalChunks} - ${baseName}`);
+
+      // 更新进度
+      const overallProgress = ((i + 1) / totalChunks) * 100;
+      updateItemProgress(item, overallProgress, `已完成 ${i + 1}/${totalChunks} 片`);
+    }
+    updateItemProgress(item, 100, '全部上传完成');
+  }
+
+  /**
+   * 上传 base64 内容到仓库 Contents API(无进度条,用于分片)
+   */
+  async function uploadContentToRepo(token, path, content, message) {
+    const res = await fetch(
+      `https://api.github.com/repos/${CONFIG.OWNER}/${CONFIG.REPO}/contents/${encodeURIComponent(path)}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message,
+          content,
+          branch: CONFIG.BRANCH || 'main',
+        }),
+      }
+    );
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        handleInvalidToken();
+        throw new Error('Token 无效或已过期,请重新配置');
+      }
+      throw new Error(data.message || `上传分片失败 (HTTP ${res.status})`);
+    }
+  }
+
+  /**
+   * Blob 转 base64(不使用 FileReader,避免大文件内存问题)
+   */
+  function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result;
+        resolve(result.split(',')[1]);
+      };
+      reader.onerror = () => reject(new Error('分片读取失败'));
+      reader.readAsDataURL(blob);
+    });
   }
 
   // ===== Token 快速复检 =====

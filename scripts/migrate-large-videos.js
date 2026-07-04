@@ -34,14 +34,18 @@ async function main() {
 
   const files = [];
   walkDir(dir, files);
-  const videoFiles = files.filter((f) => VIDEO_EXTS.includes(path.extname(f.name).toLowerCase()));
 
-  if (videoFiles.length === 0) {
-    console.log('  临时目录无视频文件,无需迁移');
+  // 分两类:普通视频文件(50-100MB 单文件)和分片目录(>100MB 多片)
+  const videoFiles = files.filter((f) => VIDEO_EXTS.includes(path.extname(f.name).toLowerCase()));
+  const chunkDirs = findChunkDirs(files);
+
+  const totalTasks = videoFiles.length + chunkDirs.length;
+  if (totalTasks === 0) {
+    console.log('  临时目录无待迁移视频,无需迁移');
     return;
   }
 
-  console.log(`  发现 ${videoFiles.length} 个待迁移视频`);
+  console.log(`  发现 ${videoFiles.length} 个单文件 + ${chunkDirs.length} 个分片组`);
 
   if (!GITHUB_TOKEN || !GITHUB_REPOSITORY) {
     console.warn('  ⚠ 缺少 GITHUB_TOKEN 或 GITHUB_REPOSITORY,跳过迁移');
@@ -52,35 +56,53 @@ async function main() {
   let migrated = 0;
   let failed = 0;
 
+  // 1. 迁移普通单文件(50-100MB)
   for (const file of videoFiles) {
     const relPath = path.relative(ROOT, file.path).replace(/\\/g, '/');
     const stat = fs.statSync(file.path);
-    const sizeMB = stat.size / 1024 / 1024;
 
     try {
-      console.log(`  迁移: ${relPath}(${formatBytes(stat.size)})`);
-
-      // 1. 读取文件内容
+      console.log(`  迁移单文件: ${relPath}(${formatBytes(stat.size)})`);
       const content = fs.readFileSync(file.path);
-
-      // 2. 创建或复用 Release(按日期分组)
       const tag = `videos-${new Date().toISOString().slice(0, 10)}`;
       const release = await findOrCreateRelease(owner, repo, tag);
-
-      // 3. 上传到 Release 作为附件
       const asset = await uploadAsset(owner, repo, release.id, file.name, content);
       console.log(`    ✓ 已上传到 Release ${tag}:${asset.browser_download_url}`);
-
-      // 4. 获取文件 SHA 并从仓库删除
       const sha = await getFileSha(owner, repo, relPath);
       await deleteFile(owner, repo, relPath, sha);
       console.log(`    ✓ 已从仓库删除 ${relPath}`);
-
-      // 5. 删除本地文件(避免下次重复处理)
       fs.unlinkSync(file.path);
       migrated++;
     } catch (err) {
       console.error(`    ✗ 迁移失败:${err.message}`);
+      failed++;
+    }
+  }
+
+  // 2. 合并并迁移分片文件(>100MB)
+  for (const chunkDir of chunkDirs) {
+    try {
+      console.log(`  合并分片: ${chunkDir.baseName}(${chunkDir.totalChunks} 片)`);
+      const mergedContent = await mergeChunks(owner, repo, chunkDir);
+      console.log(`    ✓ 合并完成,大小 ${formatBytes(mergedContent.length)}`);
+
+      const tag = `videos-${new Date().toISOString().slice(0, 10)}`;
+      const release = await findOrCreateRelease(owner, repo, tag);
+      const asset = await uploadAsset(owner, repo, release.id, chunkDir.originalName, mergedContent);
+      console.log(`    ✓ 已上传到 Release ${tag}:${asset.browser_download_url}`);
+
+      // 删除所有分片文件和 info.json
+      await deleteChunkFiles(owner, repo, chunkDir);
+      console.log(`    ✓ 已清理分片文件`);
+
+      // 删除本地目录
+      const localDir = path.resolve(ROOT, PENDING_DIR, chunkDir.baseName);
+      if (fs.existsSync(localDir)) {
+        fs.rmSync(localDir, { recursive: true, force: true });
+      }
+      migrated++;
+    } catch (err) {
+      console.error(`    ✗ 分片合并失败:${err.message}`);
       failed++;
     }
   }
@@ -105,6 +127,90 @@ function walkDir(dir, result) {
       walkDir(fullPath, result);
     } else if (entry.isFile()) {
       result.push({ name: entry.name, path: fullPath, sha: null });
+    }
+  }
+}
+
+/**
+ * 查找分片目录
+ * 分片结构:videos-pending/{baseName}/info.json + part-001 + part-002 ...
+ * @param {Array} allFiles walkDir 收集的所有文件
+ * @returns {Array<object>} 分片信息列表
+ */
+function findChunkDirs(allFiles) {
+  const infoFiles = allFiles.filter((f) => f.name === 'info.json');
+  const chunkDirs = [];
+  for (const infoFile of infoFiles) {
+    try {
+      const content = fs.readFileSync(infoFile.path, 'utf8');
+      const info = JSON.parse(content);
+      if (info.baseName && info.totalChunks) {
+        chunkDirs.push({
+          baseName: info.baseName,
+          originalName: info.originalName || info.baseName,
+          totalChunks: info.totalChunks,
+          size: info.size || 0,
+          dir: path.dirname(infoFile.path),
+        });
+      }
+    } catch (err) {
+      console.warn(`  ⚠ 解析 info.json 失败:${err.message}`);
+    }
+  }
+  return chunkDirs;
+}
+
+/**
+ * 合并分片文件
+ * 通过 Contents API 下载每个 part-NNN,合并成一个 Buffer
+ * @param {string} owner
+ * @param {string} repo
+ * @param {object} chunkDir 分片信息
+ * @returns {Promise<Buffer>} 合并后的文件内容
+ */
+async function mergeChunks(owner, repo, chunkDir) {
+  const chunks = [];
+  for (let i = 1; i <= chunkDir.totalChunks; i++) {
+    const chunkNum = String(i).padStart(3, '0');
+    const chunkPath = `${PENDING_DIR}/${chunkDir.baseName}/part-${chunkNum}`;
+    console.log(`    下载分片 ${i}/${chunkDir.totalChunks}...`);
+    const content = await downloadFileContent(owner, repo, chunkPath);
+    chunks.push(Buffer.from(content, 'base64'));
+  }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * 通过 Contents API 下载文件内容(base64)
+ */
+async function downloadFileContent(owner, repo, relPath) {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(relPath)}`,
+    { headers: authHeaders() }
+  );
+  if (!res.ok) {
+    throw new Error(`下载分片失败: HTTP ${res.status} - ${relPath}`);
+  }
+  const data = await res.json();
+  // GitHub API 返回 base64 编码的内容
+  return data.content;
+}
+
+/**
+ * 删除分片目录下的所有文件(info.json + part-NNN)
+ */
+async function deleteChunkFiles(owner, repo, chunkDir) {
+  const filesToDelete = ['info.json'];
+  for (let i = 1; i <= chunkDir.totalChunks; i++) {
+    filesToDelete.push(`part-${String(i).padStart(3, '0')}`);
+  }
+  for (const fileName of filesToDelete) {
+    const filePath = `${PENDING_DIR}/${chunkDir.baseName}/${fileName}`;
+    try {
+      const sha = await getFileSha(owner, repo, filePath);
+      await deleteFile(owner, repo, filePath, sha);
+    } catch (err) {
+      console.warn(`    ⚠ 删除 ${fileName} 失败:${err.message}`);
     }
   }
 }

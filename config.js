@@ -25,10 +25,11 @@ window.VIDEO_CONFIG = {
 
   // Releases 国内加速镜像(播放器自动尝试,失败回退到 GitHub 原始链接)
   // 镜像格式:把 https://github.com 替换为镜像前缀
-  // 留空数组则只用 GitHub 原始链接
+  // 第一个为最优先源,依次尝试
   RELEASE_MIRRORS: [
-    'https://gh-proxy.com',
-    'https://github.catvod.com',
+    'https://ghmp4.5201125.xyz', // 自建 Cloudflare Worker(最稳定,推荐)
+    'https://gh-proxy.com',       // 公共镜像(备选)
+    'https://github.catvod.com',  // 公共镜像(备选)
   ],
 
   // 分页:每页显示视频数量

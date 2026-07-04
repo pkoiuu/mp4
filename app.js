@@ -393,7 +393,17 @@
       // 镜像直链(国内加速)
       if (links.mirrors && links.mirrors.length > 0) {
         links.mirrors.forEach((mirrorUrl, i) => {
-          const label = i === 0 ? '镜像 ★' : `镜像${i + 1}`;
+          // 根据域名生成标签
+          let label;
+          if (mirrorUrl.includes('ghmp4.')) {
+            label = i === 0 ? '自建镜像 ★' : `自建镜像`;
+          } else if (mirrorUrl.includes('gh-proxy')) {
+            label = 'gh-proxy';
+          } else if (mirrorUrl.includes('catvod')) {
+            label = 'catvod';
+          } else {
+            label = `镜像${i + 1}`;
+          }
           rows.push(buildLinkRow(label, mirrorUrl, i === 0));
         });
       }

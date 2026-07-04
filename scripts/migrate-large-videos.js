@@ -224,8 +224,10 @@ async function mergeChunks(owner, repo, chunkDir) {
 
 /**
  * 通过 Contents API 下载文件内容(base64)
+ * 注意:GitHub API 对 1-100MB 文件返回空 content 字段,需要用 raw 媒体类型或 download_url
  */
 async function downloadFileContent(owner, repo, relPath) {
+  // 先获取文件信息(含 download_url)
   const res = await fetch(
     `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(relPath)}`,
     { headers: authHeaders() }
@@ -234,8 +236,33 @@ async function downloadFileContent(owner, repo, relPath) {
     throw new Error(`下载分片失败: HTTP ${res.status} - ${relPath}`);
   }
   const data = await res.json();
-  // GitHub API 返回 base64 编码的内容
-  return data.content;
+
+  // 如果 content 字段有值(小文件),直接返回
+  if (data.content && data.content.length > 0) {
+    return data.content;
+  }
+
+  // 大文件(1-100MB):用 download_url 下载原始内容,再转 base64
+  if (data.download_url) {
+    console.log(`      用 raw URL 下载...`);
+    const rawRes = await fetch(data.download_url);
+    if (!rawRes.ok) {
+      throw new Error(`下载分片原始内容失败: HTTP ${rawRes.status}`);
+    }
+    const buffer = Buffer.from(await rawRes.arrayBuffer());
+    return buffer.toString('base64');
+  }
+
+  // 最后手段:用 raw 媒体类型
+  const rawRes = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(relPath)}`,
+    { headers: { ...authHeaders(), Accept: 'application/vnd.github.raw+json' } }
+  );
+  if (!rawRes.ok) {
+    throw new Error(`下载分片 raw 失败: HTTP ${rawRes.status}`);
+  }
+  const buffer = Buffer.from(await rawRes.arrayBuffer());
+  return buffer.toString('base64');
 }
 
 /**

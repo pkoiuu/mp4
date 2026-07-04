@@ -1,6 +1,8 @@
-# GitHub Action: 自动扫描视频目录与 Releases,生成 videos.json 清单
-# 功能描述: 当 videos/ 目录变化或 Release 发布时,自动更新视频清单并提交
-# 触发条件: push 到 main(videos 目录或脚本变更)、Release 事件、手动触发
+# GitHub Action: 自动迁移大视频到 Releases + 生成视频清单
+# 功能描述:
+#   1. 扫描 videos-pending/ 目录,把大视频迁移到 GitHub Releases 并从仓库删除
+#   2. 扫描 videos/ 目录 + Releases,合并生成 videos.json 清单
+# 触发条件: push 到 main(videos 或 videos-pending 目录变化)、Release 事件、手动触发
 name: Update Video Manifest
 
 on:
@@ -8,13 +10,14 @@ on:
     branches: [main]
     paths:
       - 'videos/**'
-      - 'scripts/generate-manifest.js'
+      - 'videos-pending/**'
+      - 'scripts/**'
       - '.github/workflows/update-videos.yml'
   release:
     types: [published, unpublished, edited, deleted]
   workflow_dispatch:
 
-# 需要 write 权限以便提交生成的清单
+# 需要 write 权限以便提交清单和创建 Release
 permissions:
   contents: write
 
@@ -22,7 +25,7 @@ jobs:
   update-manifest:
     runs-on: ubuntu-latest
     steps:
-      # 1. 检出代码,fetch-depth: 0 以获取完整 git 历史(用于读取文件提交时间)
+      # 1. 检出代码,fetch-depth: 0 以获取完整 git 历史
       - name: 检出仓库
         uses: actions/checkout@v4
         with:
@@ -34,14 +37,35 @@ jobs:
         with:
           node-version: '20'
 
-      # 3. 生成视频清单(扫描 videos/ 目录 + Releases)
+      # 3. 迁移大视频:扫描 videos-pending/,迁移到 Releases 并从仓库删除
+      - name: 迁移大视频到 Releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/migrate-large-videos.js
+
+      # 4. 提交迁移产生的删除变更(如果有)
+      - name: 提交迁移变更
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "无迁移变更,跳过提交"
+          else
+            git commit -m "chore: 迁移大视频到 Releases [skip ci]"
+            git push
+            echo "✓ 迁移变更已提交"
+          fi
+
+      # 5. 生成视频清单(扫描 videos/ 目录 + Releases)
       - name: 生成视频清单
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: node scripts/generate-manifest.js
 
-      # 4. 提交并推送清单变更
+      # 6. 提交并推送清单变更
       - name: 提交清单变更
         run: |
           git config user.name "github-actions[bot]"

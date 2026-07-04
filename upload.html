@@ -40,7 +40,7 @@
     <!-- 步骤 2:上传区 -->
     <section class="panel" id="uploadPanel" hidden>
       <h2 class="panel-title">第 2 步:选择视频文件</h2>
-      <p class="panel-desc">支持 MP4/WebM/MOV 等格式。小视频(&le;100MB)上传到 <code>videos/</code> 目录,大视频(&gt;100MB)上传到 Releases。</p>
+      <p class="panel-desc">支持 MP4/WebM/MOV 等格式,单文件上限 100MB。小视频(&le;50MB)上传到 <code>videos/</code>,大视频(50-100MB)上传到临时目录由 Action 自动迁移到 Releases。</p>
 
       <div class="dropzone" id="dropzone" tabindex="0">
         <svg class="dropzone-icon" viewBox="0 0 24 24" width="48" height="48" aria-hidden="true">
@@ -60,8 +60,9 @@
     <section class="panel panel-info">
       <h2 class="panel-title">上传说明</h2>
       <ul class="info-list">
-        <li>小视频上传后,GitHub Action 会自动扫描并更新画廊(约 1 分钟)</li>
-        <li>大视频上传到 Releases,需要填写 Release tag(如 <code>v1</code>)</li>
+        <li>小视频(&le;50MB)上传后,Action 自动扫描并更新画廊(约 1 分钟)</li>
+        <li>大视频(50-100MB)上传到临时目录,Action 自动迁移到 Releases 并从仓库删除</li>
+        <li>单文件上限 100MB(GitHub API 限制),超过请切分后分别上传</li>
         <li>Token 只在浏览器本地保存,关闭页面后仍保留,可随时清除</li>
         <li>上传中请保持页面打开,关闭页面会中断上传</li>
       </ul>

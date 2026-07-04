@@ -15,8 +15,10 @@
 
   // 支持的视频扩展名
   const VIDEO_EXTS = ['.mp4', '.webm', '.mov', '.mkv', '.avi', '.m4v', '.ogv', '.ogg'];
-  // 小视频大小阈值(MB),超过则走 Releases
+  // 小视频直接进 videos/,大视频先进 videos-pending/ 由 Action 迁移到 Releases
+  // GitHub Contents API 单文件硬上限 100MB,超过无法上传,需切分
   const REPO_MAX_MB = 100;
+  const LARGE_VIDEO_DIR = 'videos-pending';
 
   // DOM 引用
   const els = {
@@ -206,12 +208,22 @@
         throw new Error('Token 已失效,请重新配置(见上方第 1 步)');
       }
 
-      if (sizeMB <= REPO_MAX_MB) {
-        await uploadToRepo(file, token, item);
-      } else {
-        await uploadToRelease(file, token, item);
+      if (sizeMB > REPO_MAX_MB) {
+        // 超过 100MB,GitHub API 无法直接上传,提示用户切分
+        throw new Error(
+          `文件 ${formatBytes(file.size)} 超过 100MB,GitHub API 单文件上限 100MB。\n` +
+          `请将视频切分为小于 100MB 的片段后分别上传,或用命令行 git push。`
+        );
       }
-      updateItemStatus(item, 'success', '上传成功!Action 将自动更新画廊');
+
+      // 小视频(<=100MB)直接上传到 videos/,大视频上传到 videos-pending/ 由 Action 迁移到 Releases
+      const targetDir = sizeMB <= 50 ? (CONFIG.VIDEO_DIR || 'videos') : LARGE_VIDEO_DIR;
+      await uploadToRepo(file, token, item, targetDir);
+      if (targetDir === LARGE_VIDEO_DIR) {
+        updateItemStatus(item, 'success', '上传成功!Action 将自动迁移到 Releases(约 1-2 分钟)');
+      } else {
+        updateItemStatus(item, 'success', '上传成功!Action 将自动更新画廊');
+      }
       showToast(`上传成功:${file.name}`);
     } catch (err) {
       console.error('[上传] 失败:', err);
@@ -220,10 +232,11 @@
     }
   }
 
-  // ===== 方式 A:上传小视频到仓库 Contents API =====
-  async function uploadToRepo(file, token, item) {
+  // ===== 上传视频到仓库 Contents API =====
+  // targetDir: 目标目录(videos 或 videos-pending)
+  async function uploadToRepo(file, token, item, targetDir) {
     const baseName = uniqueName(file.name);
-    const path = `${CONFIG.VIDEO_DIR || 'videos'}/${baseName}`;
+    const path = `${targetDir}/${baseName}`;
     updateItemStatus(item, 'uploading', '正在读取文件...');
 
     // 读取并转 base64
@@ -263,114 +276,6 @@
       throw new Error(data.message || `上传失败 (HTTP ${res.status})`);
     }
     updateItemProgress(item, 100, '完成');
-  }
-
-  // ===== 方式 B:上传大视频到 Releases =====
-  async function uploadToRelease(file, token, item) {
-    // 大视频需要用户指定 tag
-    const tag = await promptTag(file.name);
-    if (!tag) {
-      throw new Error('已取消(未填写 Release tag)');
-    }
-
-    updateItemStatus(item, 'uploading', '正在查找或创建 Release...');
-    // 查找或创建 Release
-    let release = await findReleaseByTag(tag, token);
-    if (!release) {
-      release = await createRelease(tag, file.name, token);
-    }
-
-    // 检查同名资产是否已存在
-    const existing = release.assets.find((a) => a.name === file.name);
-    if (existing) {
-      throw new Error(`Release ${tag} 中已存在同名文件 ${file.name},请先删除或重命名`);
-    }
-
-    // 上传资产(用 XMLHttpRequest 获得进度)
-    updateItemStatus(item, 'uploading', '正在上传到 Releases...');
-    await uploadAsset(release.upload_url, file, token, (p) => {
-      updateItemProgress(item, p, `上传中 ${Math.round(p)}%`);
-    });
-    updateItemProgress(item, 100, '完成');
-  }
-
-  /**
-   * 用 XHR 上传 Release 资产,支持进度
-   */
-  function uploadAsset(uploadUrl, file, token, onProgress) {
-    return new Promise((resolve, reject) => {
-      // upload_url 格式:https://uploads.github.com/repos/{owner}/{repo}/releases/{id}/assets{?name,label}
-      const baseUrl = uploadUrl.split('{')[0];
-      const url = `${baseUrl}?name=${encodeURIComponent(file.name)}`;
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url, true);
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-      xhr.setRequestHeader('Accept', 'application/vnd.github+json');
-      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          onProgress((e.loaded / e.total) * 100);
-        }
-      };
-
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(JSON.parse(xhr.responseText));
-        } else {
-          if (xhr.status === 401) {
-            handleInvalidToken();
-            reject(new Error('Token 无效或已过期,请重新配置(见上方第 1 步)'));
-            return;
-          }
-          let msg = `HTTP ${xhr.status}`;
-          try {
-            const data = JSON.parse(xhr.responseText);
-            msg = data.message || msg;
-          } catch (_) {
-            /* 忽略 */
-          }
-          reject(new Error(msg));
-        }
-      };
-
-      xhr.onerror = () => reject(new Error('网络错误,上传中断'));
-      xhr.send(file);
-    });
-  }
-
-  // ===== Release 操作 =====
-  async function findReleaseByTag(tag, token) {
-    const res = await fetch(
-      `https://api.github.com/repos/${CONFIG.OWNER}/${CONFIG.REPO}/releases/tags/${encodeURIComponent(tag)}`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' } }
-    );
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error('查找 Release 失败');
-    return res.json();
-  }
-
-  async function createRelease(tag, fileName, token) {
-    const res = await fetch(`https://api.github.com/repos/${CONFIG.OWNER}/${CONFIG.REPO}/releases`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        tag_name: tag,
-        name: `视频上传 - ${tag}`,
-        body: `上传视频:${fileName}`,
-        draft: false,
-        prerelease: false,
-      }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || '创建 Release 失败');
-    }
-    return res.json();
   }
 
   // ===== Token 快速复检 =====
@@ -416,7 +321,7 @@
     item.innerHTML = `
       <div class="upload-item-header">
         <span class="upload-item-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
-        <span class="upload-item-size">${formatBytes(file.size)} · ${sizeMB <= REPO_MAX_MB ? '仓库' : 'Releases'}</span>
+        <span class="upload-item-size">${formatBytes(file.size)} · ${sizeMB <= 50 ? '仓库' : '待迁移'}</span>
       </div>
       <div class="upload-progress-wrap">
         <div class="upload-progress-bar" style="width:0%"></div>
@@ -475,15 +380,6 @@
       .replace(/[-:T]/g, '')
       .slice(0, 14);
     return `${base}-${stamp}${ext}`;
-  }
-
-  function promptTag(fileName) {
-    const defaultTag = 'video-' + new Date().toISOString().slice(0, 10);
-    const tag = window.prompt(
-      `大视频需要上传到 GitHub Release。\n请输入 Release tag(用于生成直链):\n\n文件:${fileName}\n\n建议格式:video-2026-07-04 或 v1`,
-      defaultTag
-    );
-    return tag ? tag.trim() : null;
   }
 
   function formatBytes(bytes) {

@@ -82,7 +82,17 @@ async function main() {
   // 2. 合并并迁移分片文件(>100MB)
   for (const chunkDir of chunkDirs) {
     try {
-      console.log(`  合并分片: ${chunkDir.baseName}(${chunkDir.totalChunks} 片)`);
+      console.log(`  合并分片: ${chunkDir.baseName}(预期 ${chunkDir.totalChunks} 片)`);
+
+      // 先检查分片完整性
+      const missingChunks = await checkChunkCompleteness(owner, repo, chunkDir);
+      if (missingChunks.length > 0) {
+        console.warn(`    ⚠ 分片不完整:缺少 ${missingChunks.length} 片(${missingChunks.join(', ')}),跳过`);
+        console.warn(`    提示:用户可能正在上传中,下次 Action 运行时会自动处理`);
+        failed++;
+        continue;
+      }
+
       const mergedContent = await mergeChunks(owner, repo, chunkDir);
       console.log(`    ✓ 合并完成,大小 ${formatBytes(mergedContent.length)}`);
 
@@ -158,6 +168,38 @@ function findChunkDirs(allFiles) {
     }
   }
   return chunkDirs;
+}
+
+/**
+ * 检查分片完整性 — 确认所有 part-NNN 文件都存在
+ * @returns {Promise<Array<string>>} 缺失的分片名列表(空数组=完整)
+ */
+async function checkChunkCompleteness(owner, repo, chunkDir) {
+  const missing = [];
+  for (let i = 1; i <= chunkDir.totalChunks; i++) {
+    const chunkNum = String(i).padStart(3, '0');
+    const chunkPath = `${PENDING_DIR}/${chunkDir.baseName}/part-${chunkNum}`;
+    const exists = await fileExists(owner, repo, chunkPath);
+    if (!exists) {
+      missing.push(`part-${chunkNum}`);
+    }
+  }
+  return missing;
+}
+
+/**
+ * 检查文件是否存在于仓库中
+ */
+async function fileExists(owner, repo, relPath) {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(relPath)}`,
+      { headers: authHeaders() }
+    );
+    return res.ok;
+  } catch (_) {
+    return false;
+  }
 }
 
 /**

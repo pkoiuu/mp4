@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-07-04T11:18:41.215Z",
+  "generatedAt": "2026-07-04T11:22:43.094Z",
   "repo": "pkoiuu/mp4",
   "branch": "main",
   "videoDir": "videos",
-  "total": 4,
+  "total": 5,
   "videos": [
     {
       "name": "sample-bunny-360.mp4",
@@ -32,6 +32,16 @@
       "size": 31859055,
       "source": "repo",
       "uploadedAt": "2026-07-04T16:25:20+08:00"
+    },
+    {
+      "name": "2025.mp4",
+      "path": "releases/videos-2026-07-04/2025.mp4",
+      "size": 321826815,
+      "source": "release",
+      "tag": "videos-2026-07-04",
+      "releaseName": "视频归档 - videos-2026-07-04",
+      "url": "https://github.com/pkoiuu/mp4/releases/download/videos-2026-07-04/2025.mp4",
+      "uploadedAt": "2026-07-04T11:22:29Z"
     }
   ]
 }

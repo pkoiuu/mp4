@@ -1,0 +1,56 @@
+# GitHub Action: 自动扫描视频目录与 Releases,生成 videos.json 清单
+# 功能描述: 当 videos/ 目录变化或 Release 发布时,自动更新视频清单并提交
+# 触发条件: push 到 main(videos 目录或脚本变更)、Release 事件、手动触发
+name: Update Video Manifest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'videos/**'
+      - 'scripts/generate-manifest.js'
+      - '.github/workflows/update-videos.yml'
+  release:
+    types: [published, unpublished, edited, deleted]
+  workflow_dispatch:
+
+# 需要 write 权限以便提交生成的清单
+permissions:
+  contents: write
+
+jobs:
+  update-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. 检出代码,fetch-depth: 0 以获取完整 git 历史(用于读取文件提交时间)
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. 配置 Node.js(Node 20 自带全局 fetch)
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # 3. 生成视频清单(扫描 videos/ 目录 + Releases)
+      - name: 生成视频清单
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node scripts/generate-manifest.js
+
+      # 4. 提交并推送清单变更
+      - name: 提交清单变更
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add videos.json
+          if git diff --cached --quiet; then
+            echo "清单无变化,跳过提交"
+          else
+            git commit -m "chore: 自动更新视频清单 [skip ci]"
+            git push
+            echo "✓ 清单已提交"
+          fi

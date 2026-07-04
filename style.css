@@ -32,6 +32,11 @@
   box-sizing: border-box;
 }
 
+/* hidden 属性必须强制生效,避免被 display:flex 等覆盖导致模态框无法隐藏 */
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }

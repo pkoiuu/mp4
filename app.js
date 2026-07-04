@@ -430,7 +430,9 @@
     const path = video.path || `${VIDEO_DIR || 'videos'}/${video.name}`;
     const raw = `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${path}`;
     const jsdelivr = `https://cdn.jsdelivr.net/gh/${OWNER}/${REPO}@${BRANCH}/${path}`;
-    const pages = `/${path}`;
+    // Pages 同源链接:项目站点需带仓库名前缀(如 /mp4/videos/...)
+    // 用相对当前页面路径,避免硬编码仓库名导致 user 站点失效
+    const pages = `./${path}`;
 
     // 按大小选择优先源:小文件用 jsDelivr 加速,大文件用 raw
     let preferred, preferredType;

@@ -59,14 +59,24 @@ jobs:
           git add -A
           if git diff --cached --quiet; then
             echo "无变更,跳过提交"
-          else
-            git commit -m "chore: 自动更新视频清单和迁移大视频 [skip ci]"
-            # 拉取远程变更并 rebase,避免 push 冲突
-            git pull --rebase origin main 2>/dev/null || true
-            git push origin main 2>&1 || {
-              echo "push 失败,重试..."
-              git pull --rebase origin main
-              git push origin main
-            }
-            echo "✓ 变更已提交"
+            exit 0
           fi
+          git commit -m "chore: 自动更新视频清单和迁移大视频 [skip ci]"
+          # 尝试推送,最多重试 3 次
+          for i in 1 2 3; do
+            echo "--- 推送尝试 $i/3 ---"
+            if git push origin main; then
+              echo "✓ 推送成功"
+              exit 0
+            fi
+            echo "推送失败,拉取远程变更并 rebase..."
+            git fetch origin main
+            # 如果 rebase 有冲突,用 theirs 策略自动解决(优先保留远程的清单之外的文件)
+            if ! git rebase origin/main; then
+              echo "rebase 冲突,中止并使用 merge 策略..."
+              git rebase --abort
+              git merge origin/main --no-edit -X theirs || true
+            fi
+          done
+          # 最后一次尝试
+          git push origin main || echo "⚠ 推送最终失败,但迁移已完成,下次 Action 会重试"

@@ -1,30 +1,30 @@
 {
-  "generatedAt": "2026-07-04T00:00:00.000Z",
+  "generatedAt": "2026-07-04T06:51:43.283Z",
   "repo": "pkoiuu/mp4",
   "branch": "main",
   "videoDir": "videos",
   "total": 3,
   "videos": [
     {
-      "name": "示例-Sintel预告片.mp4",
-      "path": "videos/sample-sintel.mp4",
-      "size": 4372378,
-      "source": "repo",
-      "uploadedAt": "2026-07-04T00:00:00.000Z"
-    },
-    {
-      "name": "示例-小兔子360p.mp4",
+      "name": "sample-bunny-360.mp4",
       "path": "videos/sample-bunny-360.mp4",
-      "size": 990643,
+      "size": 991017,
       "source": "repo",
-      "uploadedAt": "2026-07-03T12:00:00.000Z"
+      "uploadedAt": "2026-07-04T14:48:23+08:00"
     },
     {
-      "name": "示例-小兔子720p.mp4",
+      "name": "sample-bunny-720.mp4",
       "path": "videos/sample-bunny-720.mp4",
-      "size": 969216,
+      "size": 969201,
       "source": "repo",
-      "uploadedAt": "2026-07-03T08:00:00.000Z"
+      "uploadedAt": "2026-07-04T14:48:23+08:00"
+    },
+    {
+      "name": "sample-sintel.mp4",
+      "path": "videos/sample-sintel.mp4",
+      "size": 4372373,
+      "source": "repo",
+      "uploadedAt": "2026-07-04T14:48:23+08:00"
     }
   ]
 }

@@ -580,6 +580,271 @@ body {
   background: var(--color-surface);
 }
 
+/* 主页头部上传入口 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-upload {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+  font-weight: 500;
+}
+
+.btn-upload:hover {
+  background: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+  color: #fff;
+}
+
+/* ===== 上传页面专属样式 ===== */
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.panel-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.panel-desc {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  margin-bottom: 16px;
+  line-height: 1.7;
+}
+
+.panel-desc a {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.panel-desc a:hover {
+  text-decoration: underline;
+}
+
+.panel-desc code {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.panel-info {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+}
+
+/* Token 配置区 */
+.token-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.token-input {
+  flex: 1;
+  min-width: 240px;
+  height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: 0.9375rem;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.token-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.token-status {
+  margin-top: 12px;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.token-status.success {
+  color: var(--color-success);
+}
+
+.token-status.error {
+  color: #dc2626;
+}
+
+/* 拖拽上传区 */
+.dropzone {
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius);
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  outline: none;
+}
+
+.dropzone:hover,
+.dropzone:focus {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.dropzone.dragover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  transform: scale(1.01);
+}
+
+.dropzone-icon {
+  color: var(--color-text-muted);
+  margin-bottom: 12px;
+}
+
+.dropzone-text {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: 4px;
+}
+
+.dropzone-hint {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.dropzone-link {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+/* 上传任务列表 */
+.upload-list {
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.upload-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  background: var(--color-surface);
+}
+
+.upload-item.uploading {
+  border-color: var(--color-primary);
+}
+
+.upload-item.success {
+  border-color: var(--color-success);
+  background: #f0fdf4;
+}
+
+.upload-item.error {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.upload-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.upload-item-name {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.upload-item-size {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.upload-progress-wrap {
+  height: 8px;
+  background: var(--color-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.upload-progress-bar {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+
+.upload-item.success .upload-progress-bar {
+  background: var(--color-success);
+}
+
+.upload-item.error .upload-progress-bar {
+  background: #dc2626;
+}
+
+.upload-item-status {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+/* 说明列表 */
+.info-list {
+  list-style: none;
+  padding: 0;
+}
+
+.info-list li {
+  font-size: 0.875rem;
+  color: var(--color-text);
+  padding: 6px 0;
+  padding-left: 20px;
+  position: relative;
+  line-height: 1.6;
+}
+
+.info-list li::before {
+  content: "•";
+  position: absolute;
+  left: 6px;
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.info-list code {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
 /* ===== 响应式 ===== */
 @media (max-width: 640px) {
   .header-inner {

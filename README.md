@@ -59,7 +59,19 @@ window.VIDEO_CONFIG = {
 
 ### 步骤 4:上传视频
 
-#### 小视频(< 100MB):直接 git 提交
+有三种上传方式,推荐用网页上传(最简单)。
+
+#### 方式 A:网页上传(推荐)
+
+1. 打开站点 `https://<你的用户名>.github.io/<仓库名>/upload.html`
+2. 配置 GitHub Token:点页面上的链接创建一个 PAT(勾选 `repo` 权限),粘贴到输入框保存
+3. Token 验证通过后,拖拽或选择视频文件
+4. 小视频(≤100MB)自动上传到 `videos/`,大视频(>100MB)弹窗让你填 Release tag 后上传到 Releases
+5. 上传成功后,Action 自动更新画廊
+
+> Token 只存在浏览器 localStorage,不上传服务器。可在页面随时清除。
+
+#### 方式 B:命令行上传小视频(< 100MB)
 
 ```bash
 # 把 MP4 文件放入 videos/ 目录
@@ -71,7 +83,7 @@ git push
 
 推送后 GitHub Action 会自动扫描 `videos/` 目录并更新 `videos.json`,网页随即显示新视频。
 
-#### 大视频(> 100MB):上传到 Releases
+#### 方式 C:Releases 页面上传大视频(> 100MB)
 
 > ⚠️ 单文件超过 100MB 无法直接 git 提交(GitHub 单文件硬上限),必须走 Releases。
 
